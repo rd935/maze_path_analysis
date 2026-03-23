@@ -1,0 +1,25 @@
+# Analysis of Grid-Based Path Planning Algorithms
+
+This project compares grid-based path planning algorithms including A*, Jump Point Search (JPS), and Theta*.
+
+## Goals
+- Measure runtime scalability across grid sizes
+- Compare node expansions under varying obstacle densities
+- Evaluate path quality and computational overhead
+- Benchmark performance on synthetic 2D grid maps
+
+## Algorithms
+- A*
+- JPS
+- Theta*
+
+## Project Structure
+- `src/algorithms/`: path planning implementations
+- `src/utils/`: grid generation, heuristics, visualization
+- `experiments/`: benchmarking scripts
+- `results/`: saved outputs
+- `tests/`: unit tests
+
+## Setup
+```bash
+pip install -r requirements.txt
