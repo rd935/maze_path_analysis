@@ -8,8 +8,8 @@ from src.utils.heuristics import octile
 
 
 def main() -> None:
-    rows = 15
-    cols = 20
+    rows = 10
+    cols = 10
     obstacle_prob = 0.2
     seed = 42
 
