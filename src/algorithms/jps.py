@@ -16,6 +16,14 @@ class JPSResult:
     found: bool
 
 
+SQRT2 = math.sqrt(2.0)
+
+DIRS_8 = [
+    (-1, 0), (1, 0), (0, -1), (0, 1),
+    (-1, -1), (-1, 1), (1, -1), (1, 1),
+]
+
+
 def sign(x: int) -> int:
     if x > 0:
         return 1
@@ -24,12 +32,35 @@ def sign(x: int) -> int:
     return 0
 
 
-def octile_step_distance(a: Point, b: Point) -> float:
+def octile_distance(a: Point, b: Point) -> float:
     dr = abs(a[0] - b[0])
     dc = abs(a[1] - b[1])
     diag = min(dr, dc)
     straight = max(dr, dc) - diag
-    return diag * math.sqrt(2) + straight
+    return diag * SQRT2 + straight
+
+
+def step_cost(direction: Tuple[int, int]) -> float:
+    dr, dc = direction
+    return SQRT2 if dr != 0 and dc != 0 else 1.0
+
+
+def valid_move(grid: Grid, current: Point, direction: Tuple[int, int]) -> bool:
+    r, c = current
+    dr, dc = direction
+    nxt = (r + dr, c + dc)
+
+    if not is_walkable(grid, nxt):
+        return False
+
+    # no corner cutting
+    if dr != 0 and dc != 0:
+        if not is_walkable(grid, (r + dr, c)):
+            return False
+        if not is_walkable(grid, (r, c + dc)):
+            return False
+
+    return True
 
 
 def reconstruct_jump_path(came_from: Dict[Point, Point], current: Point) -> List[Point]:
@@ -62,86 +93,60 @@ def expand_jump_path(path: List[Point]) -> List[Point]:
     return full
 
 
-def valid_move(grid: Grid, current: Point, direction: Tuple[int, int]) -> bool:
-    r, c = current
-    dr, dc = direction
-    nxt = (r + dr, c + dc)
-
-    if not is_walkable(grid, nxt):
-        return False
-
-    # Prevent diagonal corner cutting
-    if dr != 0 and dc != 0:
-        if not is_walkable(grid, (r + dr, c)):
-            return False
-        if not is_walkable(grid, (r, c + dc)):
-            return False
-
-    return True
+def all_valid_neighbors(grid: Grid, current: Point) -> List[Tuple[int, int]]:
+    return [d for d in DIRS_8 if valid_move(grid, current, d)]
 
 
-def pruned_directions(grid: Grid, current: Point, parent: Optional[Point]) -> List[Tuple[int, int]]:
+def prune_neighbors(
+    grid: Grid,
+    current: Point,
+    parent: Optional[Point],
+) -> List[Tuple[int, int]]:
     """
-    JPS pruning adapted for 8-connected grids with NO corner cutting.
-
-    Key idea:
-    - diagonal parent move -> keep diagonal + its two straight components
-    - straight parent move -> keep straight continuation
-      and allow side turns only when they become newly available
-      after passing an obstacle boundary
+    Conservative pruning.
+    If parent is None -> all valid directions.
+    Otherwise use a light pruning rule, but do NOT rely on it for completeness.
     """
     if parent is None:
-        dirs = [
-            (-1, 0), (1, 0), (0, -1), (0, 1),
-            (-1, -1), (-1, 1), (1, -1), (1, 1),
-        ]
-        return [d for d in dirs if valid_move(grid, current, d)]
+        return all_valid_neighbors(grid, current)
 
     r, c = current
     pr, pc = parent
     dr = sign(r - pr)
     dc = sign(c - pc)
 
-    directions: List[Tuple[int, int]] = []
+    neighbors: List[Tuple[int, int]] = []
 
-    # Diagonal movement
+    # Always allow forward continuation
+    if valid_move(grid, current, (dr, dc)):
+        neighbors.append((dr, dc))
+
+    # For diagonal motion, also allow straight components
     if dr != 0 and dc != 0:
-        for d in [(dr, dc), (dr, 0), (0, dc)]:
-            if valid_move(grid, current, d):
-                directions.append(d)
-
-    # Vertical movement
-    elif dr != 0 and dc == 0:
-        # natural continuation
         if valid_move(grid, current, (dr, 0)):
-            directions.append((dr, 0))
-
-        # side branch becomes available now because the previous row
-        # along the travel direction had that side blocked
-        if (not is_walkable(grid, (r - dr, c + 1))) and is_walkable(grid, (r, c + 1)):
-            directions.append((0, 1))
-
-        if (not is_walkable(grid, (r - dr, c - 1))) and is_walkable(grid, (r, c - 1)):
-            directions.append((0, -1))
-
-    # Horizontal movement
-    elif dr == 0 and dc != 0:
-        # natural continuation
+            neighbors.append((dr, 0))
         if valid_move(grid, current, (0, dc)):
-            directions.append((0, dc))
+            neighbors.append((0, dc))
 
-        # side branch becomes available now because the previous column
-        # along the travel direction had that side blocked
-        if (not is_walkable(grid, (r - 1, c - dc))) and is_walkable(grid, (r - 1, c)):
-            directions.append((-1, 0))
+    # Conservative forced-turn additions
+    for d in DIRS_8:
+        if d not in neighbors and valid_move(grid, current, d):
+            nr, nc = current[0] + d[0], current[1] + d[1]
+            # Prefer neighbors that are near obstacles / possible turning points
+            if any(
+                not is_walkable(grid, (nr + ar, nc + ac))
+                for ar, ac in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            ):
+                neighbors.append(d)
 
-        if (not is_walkable(grid, (r + 1, c - dc))) and is_walkable(grid, (r + 1, c)):
-            directions.append((1, 0))
+    # If pruning got too aggressive, fall back
+    if not neighbors:
+        neighbors = all_valid_neighbors(grid, current)
 
-    # deduplicate while preserving order
+    # deduplicate
     out: List[Tuple[int, int]] = []
     seen = set()
-    for d in directions:
+    for d in neighbors:
         if d not in seen:
             seen.add(d)
             out.append(d)
@@ -150,37 +155,29 @@ def pruned_directions(grid: Grid, current: Point, parent: Optional[Point]) -> Li
 
 
 def has_forced_neighbor(grid: Grid, node: Point, direction: Tuple[int, int]) -> bool:
-    """
-    Forced-neighbor test adapted for NO-corner-cutting movement.
-
-    For straight motion, a node is a jump point when a side direction
-    becomes newly available after being blocked on the previous step.
-
-    For diagonal motion, we rely primarily on recursive straight sub-jump
-    checks in jump().
-    """
     r, c = node
     dr, dc = direction
 
-    # Vertical movement
-    if dr != 0 and dc == 0:
-        if (not is_walkable(grid, (r - dr, c + 1))) and is_walkable(grid, (r, c + 1)):
+    # Horizontal
+    if dr == 0 and dc != 0:
+        if not is_walkable(grid, (r + 1, c)) and is_walkable(grid, (r + 1, c + dc)):
             return True
-        if (not is_walkable(grid, (r - dr, c - 1))) and is_walkable(grid, (r, c - 1)):
-            return True
-
-    # Horizontal movement
-    elif dr == 0 and dc != 0:
-        if (not is_walkable(grid, (r - 1, c - dc))) and is_walkable(grid, (r - 1, c)):
-            return True
-        if (not is_walkable(grid, (r + 1, c - dc))) and is_walkable(grid, (r + 1, c)):
+        if not is_walkable(grid, (r - 1, c)) and is_walkable(grid, (r - 1, c + dc)):
             return True
 
-    # Diagonal movement
-    elif dr != 0 and dc != 0:
-        # For no-corner-cutting JPS, diagonal jump points are largely handled by
-        # the recursive straight-component checks inside jump().
-        return False
+    # Vertical
+    elif dr != 0 and dc == 0:
+        if not is_walkable(grid, (r, c + 1)) and is_walkable(grid, (r + dr, c + 1)):
+            return True
+        if not is_walkable(grid, (r, c - 1)) and is_walkable(grid, (r + dr, c - 1)):
+            return True
+
+    # Diagonal
+    else:
+        if not is_walkable(grid, (r - dr, c)) and is_walkable(grid, (r - dr, c + dc)):
+            return True
+        if not is_walkable(grid, (r, c - dc)) and is_walkable(grid, (r + dr, c - dc)):
+            return True
 
     return False
 
@@ -191,13 +188,6 @@ def jump(
     direction: Tuple[int, int],
     goal: Point,
 ) -> Optional[Point]:
-    """
-    Move repeatedly in a direction until:
-    - blocked
-    - goal reached
-    - forced neighbor found
-    - for diagonal moves: one of horizontal/vertical sub-jumps succeeds
-    """
     dr, dc = direction
     r, c = current
 
@@ -205,38 +195,47 @@ def jump(
         if not valid_move(grid, (r, c), direction):
             return None
 
-        nxt = (r + dr, c + dc)
+        r += dr
+        c += dc
+        node = (r, c)
 
-        if nxt == goal:
-            return nxt
+        if node == goal:
+            return node
 
-        if has_forced_neighbor(grid, nxt, direction):
-            return nxt
+        if has_forced_neighbor(grid, node, direction):
+            return node
 
-        # For diagonal moves, if either straight component reaches a jump point,
-        # then this diagonal node is also a jump point.
         if dr != 0 and dc != 0:
-            if jump(grid, nxt, (dr, 0), goal) is not None:
-                return nxt
-            if jump(grid, nxt, (0, dc), goal) is not None:
-                return nxt
-
-        r, c = nxt
+            if jump(grid, node, (dr, 0), goal) is not None:
+                return node
+            if jump(grid, node, (0, dc), goal) is not None:
+                return node
 
 
-def identify_successors(
-    grid: Grid,
-    current: Point,
-    parent: Optional[Point],
-    goal: Point,
-) -> List[Point]:
-    successors: List[Point] = []
-    for direction in pruned_directions(grid, current, parent):
+def identify_successors(grid, current, parent, goal):
+    successors = []
+
+    dirs = all_valid_neighbors(grid, current)
+
+    for direction in dirs:
+        # Always add the immediate neighbor for completeness
+        nr = current[0] + direction[0]
+        nc = current[1] + direction[1]
+        successors.append((nr, nc))
+
+        # Also add the jump point if one exists
         jp = jump(grid, current, direction, goal)
         if jp is not None:
             successors.append(jp)
-    return successors
 
+    out = []
+    seen = set()
+    for s in successors:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    return out
 
 def jps(
     grid: Grid,
@@ -287,12 +286,14 @@ def jps(
             if succ in closed:
                 continue
 
-            tentative_g = g_score[current] + octile_step_distance(current, succ)
+            move_cost = octile_distance(current, succ)
+            tentative_g = g_score[current] + move_cost
 
             if tentative_g < g_score.get(succ, float("inf")):
                 g_score[succ] = tentative_g
                 came_from[succ] = current
                 parent_map[succ] = current
+
                 counter += 1
                 f_score = tentative_g + heuristic_fn(succ, goal)
                 heapq.heappush(open_heap, (f_score, counter, succ))

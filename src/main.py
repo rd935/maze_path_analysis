@@ -10,10 +10,10 @@ from src.utils.heuristics import octile
 def main() -> None:
     rows = 10
     cols = 10
-    obstacle_prob = 0.2
+    obstacle_prob = 0.4
     seed = 42
 
-    algorithm = "jps"   # change to: "astar", "theta", or "jps"
+    algorithm = "astar"   # change to: "astar", "theta", or "jps"
 
     grid = generate_random_grid(
         rows=rows,
