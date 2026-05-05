@@ -8,7 +8,7 @@ import pandas as pd
 # Allow imports from project root
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from experiments.config import (  # noqa: E402
+from experiments.config import (  
     RAW_RESULTS_PATH,
     SUMMARY_DIR,
     SUMMARY_RESULTS_PATH,
@@ -29,7 +29,7 @@ def main() -> None:
             {"true": True, "false": False}
         )
 
-    df_ok = df[df["found"] == True].copy()  # noqa: E712
+    df_ok = df[df["found"] == True].copy()  
 
     if df_ok.empty:
         raise ValueError("No successful runs found in raw results.")
